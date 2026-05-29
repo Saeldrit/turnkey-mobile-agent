@@ -1,50 +1,82 @@
 # Turnkey Mobile Agent
 
-An autonomous agent that turns a one-paragraph task spec into a **complete,
-deployable native Android app** — **Kotlin + Jetpack Compose**, Gradle, planned,
-scaffolded, implemented, compiled, APK-verified, and packaged with a signing
-config and a release-AAB setup ready for Google Play.
+An autonomous agent that turns a one-paragraph idea into a **complete, deployable
+native Android app** — **Kotlin + Jetpack Compose**, Gradle, planned, scaffolded,
+implemented, compiled, APK-verified, and packaged with a signing config and a
+release-AAB setup ready for Google Play.
 
 Runs on **Claude or other top models** (Qwen, DeepSeek, Kimi, GLM, or any
 Anthropic-compatible endpoint) — switchable per run, even per phase.
 
 Built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview).
 
-## Quick start — just run it
+---
 
-**Easiest:** double-click **`start.bat`** (Windows) or run **`./start.sh`** (macOS/Linux).
-It installs dependencies once and opens an interactive wizard that asks what to build,
-which model to use, and the rest — no flags to remember.
+## The interface — a console wizard (no flags to learn)
 
-Or from a terminal:
+You drive everything from one interactive menu. **Double-click `start.bat`**
+(Windows) or run **`./start.sh`** (macOS/Linux) — or `npm start` in a terminal.
+The wizard walks you through it:
 
-```bash
-npm install
-npm start            # interactive wizard
-npm run doctor       # first time on a machine: check you're ready
+```text
+══════════════════════════════════
+  TURNKEY MOBILE — мастер сборки
+══════════════════════════════════
+  Нативное Android-приложение (Kotlin + Compose) под ключ.
+
+1) Что за приложение делаем?
+   Опиши одной-двумя фразами — или укажи путь к .md со спецификацией.
+   → habit tracker with reminders and a weekly chart
+
+2) На какой модели строить?
+   1. Anthropic (Claude)         (готов)
+   2. Qwen (Alibaba DashScope)   (missing DASHSCOPE_API_KEY)
+   3. DeepSeek                   (missing DEEPSEEK_API_KEY)
+   4. Kimi (Moonshot)            (missing MOONSHOT_API_KEY)
+   5. GLM (Z.ai)                 (missing ZAI_API_KEY)
+   6. Custom (Anthropic-compatible)
+   Номер → [1]
+
+3) Имя проекта  (папка внутри workspace/)   → [habit-tracker]
+
+4) Лимит стоимости, $  (страховка)           → [8]
+
+Готово к запуску:   Enter — запустить, q — отмена
 ```
 
-The wizard collects everything and runs the build. The finished app lands in
-`workspace/<slug>/`, opens in Android Studio, and runs with `gradlew installDebug`.
+That's the whole UX — answer the questions and the agent builds the app. The
+wizard also:
 
-<details><summary><b>Advanced:</b> one-shot, no prompts (flags)</summary>
+- **lists every model with its readiness** and lets you pick by number;
+- if you pick a provider that needs a key, it **offers to enter it and save it to `.env`** (once);
+- if it finds an interrupted build for that name, it **offers to resume**;
+- streams live progress, then prints a final build summary.
+
+The finished app lands in `workspace/<slug>/` — open it in Android Studio or run
+`gradlew installDebug` to put it on a connected phone.
+
+---
+
+## Install
 
 ```bash
-npx tsx src/cli.ts --task-file ./examples/notes.task.md --slug notes --provider qwen
+npm install          # one time
+npm run doctor       # check this machine is ready (Node, provider keys, Android SDK/JDK)
+npm start            # launch the wizard
 ```
 
-Call the CLI directly with `npx tsx` (not `npm start -- …`): `npm run` strips unknown
-`--flags` on some platforms. The CLI also accepts a bare spec-file path as a safety net.
-</details>
+Or just **double-click `start.bat`** — it installs dependencies on first run, then
+opens the wizard. `npm run doctor` prints a green/yellow checklist of what's ready
+and what's missing.
 
 ---
 
 ## Why it's reliable, cheap, and compaction-proof
 
-The agent does **not** run as one giant conversation. It runs as a deterministic
-pipeline of bounded phases, each a fresh Agent SDK `query()`:
+Under the hood the agent does **not** run as one giant conversation. It runs as a
+deterministic pipeline of bounded phases, each a fresh Agent SDK `query()`:
 
-```
+```text
 PLAN ─▶ SCAFFOLD ─▶ IMPLEMENT* ─▶ VERIFY* ─▶ DEPLOY ─▶ FINALIZE
                     (loops)        (loops)
 ```
@@ -58,8 +90,8 @@ The single source of truth is on disk, not in the model's context:
 |---|---|
 | **Survives context compaction** | Every phase re-reads `BUILD_STATE.json`/`PLAN.md` first and continues from the first unfinished task. If working memory is compacted mid-phase, the durable files let it recover. State lives on the filesystem, never only in context. |
 | **Saves tokens** | Each phase starts with a small, focused context instead of dragging the whole history forward. Cheaper models run the bulk of coding; the strongest model is reserved for planning. Targeted edits, no re-reading, big subtasks offloaded to subagents. |
-| **Max performance** | `permissionMode: bypassPermissions` (zero approval stalls), parallel tool calls, the Claude Code system-prompt preset, and bounded turns/rounds so it always converges. |
-| **Resumable** | `--resume` skips completed phases and picks up exactly where it stopped. |
+| **Max performance** | `bypassPermissions` (zero approval stalls), parallel tool calls, the Claude Code system-prompt preset, bounded turns/rounds, and auto-retry of transient API errors. |
+| **Resumable** | The wizard offers to resume; it skips completed phases and picks up where it stopped. |
 
 ---
 
@@ -73,7 +105,8 @@ Generated apps are **native Android**:
 - Gradle Kotlin DSL + a version catalog (`gradle/libs.versions.toml`) and the Gradle wrapper.
 - Signed release AAB via `bundleRelease` for Google Play.
 
-You need a local Android toolchain to **build/verify**:
+To **build/verify** locally you need an Android toolchain (the wizard's sibling
+`npm run doctor` checks all of this):
 
 - **Android SDK** (auto-detected via `ANDROID_HOME` or `%LOCALAPPDATA%\Android\Sdk`).
 - A **JDK** the Android Gradle Plugin accepts. If your system JDK is too new, the
@@ -84,9 +117,10 @@ The agent writes a gitignored `local.properties` with `sdk.dir` so `gradlew` wor
 
 ---
 
-## Providers — run on Claude, Qwen, or others
+## Providers — Claude, Qwen, and others
 
-Pick with `--provider <id>` (default `anthropic`). Set the matching key in `.env`.
+The wizard lists every provider with its readiness and lets you pick one (and
+paste a key if it's missing). Keys live in `.env` (see `.env.example`).
 
 | Provider | id | Key env | Endpoint |
 |---|---|---|---|
@@ -97,93 +131,13 @@ Pick with `--provider <id>` (default `anthropic`). Set the matching key in `.env
 | GLM (Z.ai) | `glm` | `ZAI_API_KEY` | `api.z.ai/api/anthropic` |
 | Any compatible | `custom` | `TURNKEY_API_KEY`/`TURNKEY_AUTH_TOKEN` | `TURNKEY_BASE_URL` |
 
-```bash
-npm run smoke -- qwen                                   # test a provider's key/endpoint
-npx tsx src/cli.ts --task-file ./examples/notes.task.md --provider qwen
-```
-
-**Mix providers per phase** (each phase is a separate query, so this just works):
-
-```bash
-# Plan & verify on Claude (reasoning), write the bulk of the code on Qwen (cheap)
-TURNKEY_PROVIDER_PLAN=anthropic TURNKEY_PROVIDER_BUILD=qwen \
-  npx tsx src/cli.ts --task-file ./examples/notes.task.md --slug notes
-```
-
-> Non-Claude models are driven through their Anthropic-compatible endpoints and
-> the `ANTHROPIC_DEFAULT_*_MODEL` alias remap. The whole agent loop (tool use,
-> the Claude Code preset) is tuned for Claude, so non-Claude models can be less
-> reliable on long autonomous runs — Claude is the safest default.
+Non-Claude models are driven through their Anthropic-compatible endpoints and the
+`ANTHROPIC_DEFAULT_*_MODEL` alias remap. The agent loop is tuned for Claude, so
+other models can be less reliable on long autonomous runs — Claude is the safest
+default. You can even **mix providers per phase** (plan on Claude, write code on
+Qwen) — see Advanced below.
 
 ---
-
-## Usage
-
-```bash
-# From a description
-npx tsx src/cli.ts "A habit tracker with reminders and a weekly progress chart"
-
-# From a spec file (recommended for anything non-trivial)
-npx tsx src/cli.ts --task-file ./examples/notes.task.md --slug notes
-
-# Choose a provider / continue / plan only
-npx tsx src/cli.ts --task-file ./examples/notes.task.md --provider qwen
-npx tsx src/cli.ts --task-file ./examples/notes.task.md --slug notes --resume
-npx tsx src/cli.ts --task-file ./examples/notes.task.md --slug notes --plan-only
-```
-
-### Flags
-
-| Flag | Meaning |
-|---|---|
-| `--task-file <path>` | Read the app spec from a file. |
-| `--slug <slug>` | App slug (kebab-case). Defaults to one derived from the task. |
-| `--provider <id>` | LLM provider (see table above). Default `anthropic`. |
-| `--out <dir>` | Output root for generated apps (default `./workspace`). |
-| `--app-dir <dir>` | Explicit target directory (overrides `--out`/`--slug`). |
-| `--max-cost <usd>` | Hard cost ceiling for the whole build (default `8`). |
-| `--resume` | Skip phases already recorded complete in `BUILD_STATE.json`. |
-| `--plan-only` | Stop after the PLAN phase. |
-
-Token-economy env knobs and per-phase provider mixing live in `.env` — see `.env.example`.
-
----
-
-## Run, manage & hand it off
-
-### Day-to-day
-
-```bash
-npm run doctor                  # is this machine ready? which providers are configured?
-npm run smoke                   # cheaply verify auth/provider (npm run smoke -- qwen)
-npx tsx src/cli.ts --task-file spec.md --slug myapp [--provider qwen]
-```
-
-- Output lands in `workspace/<slug>/` — open it in Android Studio, run `gradlew installDebug`.
-- Watch progress in the console, or read `workspace/<slug>/BUILD_STATE.json` any time.
-- If a run is interrupted or hits `--max-cost`, just re-run with `--resume`.
-
-### Hand it off to a friend
-
-Two things travel **separately** from the code: **auth** and **the Android toolchain**.
-
-1. **Share the code** (pick one):
-   - Zip the folder **without** `node_modules/`, `.env`, `workspace/`.
-   - Or push to git (recommended): `git init && git add . && git commit -m "init"`, then
-     share the repo. `.gitignore` already excludes secrets and generated output.
-2. **Your friend, on their machine:**
-   ```bash
-   npm install
-   npm run doctor          # tells them exactly what's missing
-   ```
-3. **Auth — they use their own credentials, not yours.** You can't share a Claude
-   subscription, and your `.env` keys are not included in the handoff:
-   - Claude: log into Claude Code (`claude`) once, or set their own `ANTHROPIC_API_KEY`.
-   - Or a provider key in their `.env` (e.g. `DASHSCOPE_API_KEY` for Qwen) + `--provider qwen`.
-4. **To build/verify** generated apps they also need Android Studio + SDK + a JDK. If they
-   only want the generated source (to build elsewhere), Node alone is enough to run the agent.
-
-Each user is billed on their own account / limits / API keys.
 
 ## What "turnkey" means here
 
@@ -196,40 +150,91 @@ A build is only reported `TURNKEY` when **all** hold:
 5. `README.md` documents run, release build, signing, and Play Console upload.
 6. A proper Android `.gitignore`.
 
-Deploying the generated app is then:
+Putting the generated app on a device / Play is then:
 
 ```bash
 cd workspace/<slug>
-gradlew installDebug                                  # run on a device/emulator
+gradlew installDebug                                  # run on a connected device/emulator
 gradlew bundleRelease                                 # signed Play-ready .aab
 # upload app/build/outputs/bundle/release/app-release.aab to the Play Console
 ```
 
 ---
 
+## Hand it off to someone else
+
+It's the same simple flow on their machine. Two things travel **separately** from
+the code: **auth** and **the Android toolchain**.
+
+1. **Share the code** — clone this repo (or zip the folder without `node_modules/`,
+   `.env`, `workspace/`). `.gitignore` already excludes secrets and generated output.
+2. **They run it:** `npm install`, then **double-click `start.bat`** (or `npm start`).
+   `npm run doctor` tells them exactly what's missing.
+3. **Auth is their own** — your `.env`/Claude login is not included. In the wizard
+   they pick Claude (after `claude` login or their own `ANTHROPIC_API_KEY`) or
+   another provider and paste its key when prompted.
+4. **To build/verify** they need Android Studio + SDK + a JDK. For the generated
+   source only (building elsewhere), Node alone is enough.
+
+Each user is billed on their own account / limits / API keys.
+
+---
+
+## Advanced — scripting & CI (flags, no prompts)
+
+The wizard is for interactive use. For automation/CI, call the CLI directly with
+`npx tsx` (not `npm start -- …` — `npm run` strips unknown `--flags` on some platforms):
+
+```bash
+npx tsx src/cli.ts --task-file ./examples/notes.task.md --slug notes --provider qwen --resume
+npm run smoke -- qwen        # cheaply verify a provider's key/endpoint
+```
+
+| Flag | Meaning |
+|---|---|
+| `--task-file <path>` | Read the app spec from a file (or pass a description as a bare argument). |
+| `--slug <slug>` | App slug (kebab-case). Defaults to one derived from the task. |
+| `--provider <id>` | LLM provider: `anthropic` (default), `qwen`, `deepseek`, `kimi`, `glm`, `custom`. |
+| `--out <dir>` | Output root for generated apps (default `./workspace`). |
+| `--app-dir <dir>` | Explicit target directory (overrides `--out`/`--slug`). |
+| `--max-cost <usd>` | Hard cost ceiling for the whole build (default `8`). |
+| `--resume` | Skip phases already recorded complete in `BUILD_STATE.json`. |
+| `--plan-only` | Stop after the PLAN phase. |
+
+Mix providers per phase via env (also settable in `.env`):
+
+```bash
+TURNKEY_PROVIDER_PLAN=anthropic TURNKEY_PROVIDER_BUILD=qwen \
+  npx tsx src/cli.ts --task-file ./examples/notes.task.md --slug notes
+```
+
+---
+
 ## Project layout
 
-```
+```text
 src/
-  cli.ts            # arg parsing, .env, entry
+  wizard.ts         # interactive console UI — the default entry (npm start / start.bat)
+  cli.ts            # flag-based entry for scripting / CI
+  doctor.ts         # readiness check (npm run doctor)
   orchestrator.ts   # deterministic phase pipeline + budget + resume
   phases.ts         # per-phase objectives (Android pipeline)
-  runPhase.ts       # one phase = one bounded SDK query (streaming + usage + provider)
-  systemPrompt.ts   # role + durable-state protocol + DoD (appended to preset)
+  runPhase.ts       # one phase = one bounded SDK query (streaming + usage + provider + retry)
+  systemPrompt.ts   # role + durable-state protocol + DoD (appended to the preset)
   providers.ts      # Claude / Qwen / DeepSeek / Kimi / GLM / custom registry
   state.ts          # BUILD_STATE.json (durable, immutable updates)
   budget.ts         # token/cost accounting + ceiling
   config.ts         # per-phase model/turns/tools + Android SDK/JDK resolution
-  env.ts            # .env loader
-  logger.ts         # compact console output
+  slug.ts           # slug helper      env.ts # .env loader      logger.ts # console output
   smoke.ts          # SDK/auth/provider check
-examples/           # ready-to-run task specs
-workspace/          # generated apps land here
+start.bat / start.sh  # one-click launchers (install deps + open the wizard)
+examples/             # ready-to-run task specs
+workspace/            # generated apps land here
 ```
 
 ## Cost & limits note
 
-On Claude subscription plans, Agent SDK usage draws from your plan's limits
-(and, from June 15 2026, a separate monthly Agent SDK credit). Other providers
-bill per their own pricing. The `--max-cost` ceiling and per-phase turn limits
-keep any single run bounded.
+On Claude subscription plans, Agent SDK usage draws from your plan's limits (and,
+from June 15 2026, a separate monthly Agent SDK credit). Other providers bill per
+their own pricing. The cost ceiling (wizard step 4 / `--max-cost`) and per-phase
+turn limits keep any single run bounded.
