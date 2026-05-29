@@ -12,7 +12,8 @@
     "cli": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx src/smoke.ts",
-    "doctor": "tsx src/doctor.ts"
+    "doctor": "tsx src/doctor.ts",
+    "status": "tsx src/status.ts"
   },
   "engines": {
     "node": ">=20"
