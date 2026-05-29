@@ -3,7 +3,7 @@
  * Wizard — the straight "build one app" flow (no menu). `npm run wizard`.
  * The full menu (`npm start`) wraps this plus status / resume / install.
  */
-import { Prompter } from "./prompt.ts";
+import { Tui } from "./tui.ts";
 import { loadEnv } from "./env.ts";
 import { collectBuildOptions } from "./interactive.ts";
 import { build } from "./orchestrator.ts";
@@ -14,12 +14,12 @@ async function main(): Promise<void> {
   await loadEnv();
   log.banner("TURNKEY MOBILE — мастер сборки");
   console.log("  Нативное Android-приложение (Kotlin + Compose) под ключ. Ctrl+C — выход.");
-  const p = new Prompter();
+  const tui = new Tui();
   let opts;
   try {
-    opts = await collectBuildOptions(p);
+    opts = await collectBuildOptions(tui);
   } finally {
-    p.close();
+    tui.close();
   }
   if (!opts) return;
   await build(opts, new ProgressReporter());

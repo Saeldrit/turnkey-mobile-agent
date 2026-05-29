@@ -1,12 +1,12 @@
 /**
  * Interactive collection of build options (the "new app" questions), shared by
- * the menu and the wizard. Returns null if the user cancels. Does NOT close the
- * prompter — the caller owns it.
+ * the menu and the wizard. Arrow-key model picker, text input for the rest.
+ * Returns null if the user cancels. Does NOT close the Tui — the caller owns it.
  */
 import { readFile, appendFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, join, basename } from "node:path";
-import { Prompter, yes } from "./prompt.ts";
+import { Tui, type Choice } from "./tui.ts";
 import { slugify } from "./slug.ts";
 import { loadState } from "./state.ts";
 import { DEFAULT_MAX_COST_USD } from "./config.ts";
@@ -14,11 +14,11 @@ import { knownProviders, providerReady, PROVIDERS } from "./providers.ts";
 import { log, c } from "./logger.ts";
 import type { BuildOptions } from "./types.ts";
 
-export async function collectBuildOptions(p: Prompter): Promise<BuildOptions | null> {
+export async function collectBuildOptions(tui: Tui): Promise<BuildOptions | null> {
   // 1) What to build
-  console.log("\n" + c.bold("1) Что за приложение делаем?"));
-  console.log(c.dim("   Опиши одной-двумя фразами — или укажи путь к .md со спецификацией."));
-  let task = await p.ask("   →");
+  console.log("\n" + c.bold("Что за приложение делаем?"));
+  console.log(c.dim("Опиши одной-двумя фразами — или укажи путь к .md со спецификацией."));
+  let task = await tui.input("→");
   if (!task) {
     log.error("Пустое описание — отмена.");
     return null;
@@ -31,24 +31,25 @@ export async function collectBuildOptions(p: Prompter): Promise<BuildOptions | n
     log.success(`Прочитал спецификацию из файла «${slugHint}».`);
   }
 
-  // 2) Provider
-  console.log("\n" + c.bold("2) На какой модели строить?"));
+  // 2) Provider (arrow-key pick)
   const ids = knownProviders();
-  ids.forEach((id, i) => {
+  const choices: Choice[] = ids.map((id) => {
     const r = providerReady(id);
-    const status = r.ok ? c.green("готов") : c.yellow(r.reason);
-    console.log(`   ${i + 1}. ${(PROVIDERS[id]?.label ?? id).padEnd(26)} ${c.dim("(" + status + ")")}`);
+    return { label: PROVIDERS[id]?.label ?? id, value: id, hint: r.ok ? "готов" : r.reason };
   });
-  let provider = ids[Number(await p.ask("   Номер →", "1")) - 1] ?? "anthropic";
+  const chosen = await tui.select("На какой модели строить?", choices, 0);
+  if (chosen === null) return null;
+  let provider = chosen;
 
+  // Offer to enter a missing key inline.
   let ready = providerReady(provider);
   if (!ready.ok && provider !== "anthropic" && provider !== "custom") {
     const keyEnv = PROVIDERS[provider]?.keyEnv;
     if (keyEnv) {
-      const key = await p.ask(`   Введите ${keyEnv} (Enter — пропустить):`);
+      const key = await tui.input(`Введите ${keyEnv} (Enter — пропустить):`);
       if (key) {
         process.env[keyEnv] = key;
-        if (yes(await p.ask("   Сохранить ключ в .env? (Y/n)", "Y"))) {
+        if (await tui.confirm("Сохранить ключ в .env, чтобы не вводить снова?", true)) {
           await appendFile(resolve(process.cwd(), ".env"), `\n${keyEnv}=${key}\n`, "utf8");
           log.success(".env обновлён.");
         }
@@ -62,25 +63,23 @@ export async function collectBuildOptions(p: Prompter): Promise<BuildOptions | n
   }
 
   // 3) Project name
-  console.log("\n" + c.bold("3) Имя проекта") + c.dim("  (папка внутри workspace/)"));
-  const slug = slugify(await p.ask("   →", slugHint ? slugify(slugHint) : slugify(task)));
+  console.log("\n" + c.bold("Имя проекта") + c.dim("  (папка внутри workspace/)"));
+  const slug = slugify(await tui.input("→", slugHint ? slugify(slugHint) : slugify(task)));
   const appDir = join(resolve(process.cwd(), "workspace"), slug);
 
   // Resume?
   let resume = false;
   const existing = await loadState(appDir);
   if (existing && existing.phasesCompleted.length > 0) {
-    resume = yes(
-      await p.ask(
-        `   Найдена незавершённая сборка [${existing.phasesCompleted.join(", ")}]. Продолжить? (Y/n)`,
-        "Y",
-      ),
+    resume = await tui.confirm(
+      `Найдена незавершённая сборка [${existing.phasesCompleted.join(", ")}]. Продолжить?`,
+      true,
     );
   }
 
   // 4) Cost ceiling
-  console.log("\n" + c.bold("4) Лимит стоимости, $") + c.dim("  (страховка от перерасхода)"));
-  const maxCostUsd = Number(await p.ask("   →", String(DEFAULT_MAX_COST_USD))) || DEFAULT_MAX_COST_USD;
+  console.log("\n" + c.bold("Лимит стоимости, $") + c.dim("  (страховка от перерасхода)"));
+  const maxCostUsd = Number(await tui.input("→", String(DEFAULT_MAX_COST_USD))) || DEFAULT_MAX_COST_USD;
 
   // Confirm
   console.log("\n" + c.cyan(c.bold("Готово к запуску:")));
@@ -88,7 +87,7 @@ export async function collectBuildOptions(p: Prompter): Promise<BuildOptions | n
   console.log(`   Модель:     ${PROVIDERS[provider]?.label ?? provider}`);
   console.log(`   Папка:      workspace/${slug}${resume ? c.yellow("  (продолжение)") : ""}`);
   console.log(`   Лимит:      $${maxCostUsd}`);
-  if (/^q/i.test(await p.ask("\n   Enter — запустить, q — отмена:"))) {
+  if (!(await tui.confirm("Запустить сборку сейчас?", true))) {
     log.info("Отменено.");
     return null;
   }

@@ -29,8 +29,9 @@ Built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overvi
   6)  🚪  Выход
 ```
 
-Pick **1** and it walks you through a few questions, then builds with a live
-progress bar:
+Navigate with **↑/↓ and Enter** (or just press the number; `q` cancels). Pick
+**🆕 Создать новое приложение** and it walks you through a few questions, then
+builds with a live progress bar:
 
 ```text
 ══════════════════════════════════
@@ -234,7 +235,7 @@ src/
   menu.ts           # console menu home screen — the default entry (npm start / start.bat)
   wizard.ts         # the straight "build one app" flow (npm run wizard)
   cli.ts            # flag-based entry for scripting / CI
-  interactive.ts    # shared "new app" questions     prompt.ts # buffered console input
+  interactive.ts    # shared "new app" questions     tui.ts # arrow-key select + text input
   progress.ts       # live % progress bar            status.ts # build status (npm run status)
   doctor.ts         # readiness check (npm run doctor)
   orchestrator.ts   # deterministic phase pipeline + budget + resume + progress
