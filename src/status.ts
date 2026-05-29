@@ -39,7 +39,7 @@ export async function printStatus(): Promise<void> {
     console.log(`    стек:    ${s.app?.stack ?? "?"}`);
     console.log(`    фаза:    ${s.phase}    завершены: [${s.phasesCompleted.join(", ") || "—"}]`);
     console.log(`    задачи:  ${done}/${s.tasks.length}`);
-    console.log(`    сборка:  compile=${v?.compile ?? "?"}  assemble=${v?.assemble ?? "?"}  lint=${v?.lint ?? "?"}`);
+    console.log(`    сборка:  compile=${v?.compile ?? "?"}  assemble=${v?.assemble ?? "?"}  runtime=${v?.runtime ?? "?"}  lint=${v?.lint ?? "?"}`);
     if (complete) {
       console.log(c.dim(`    → на телефон:  cd workspace/${d.name} ; gradlew installDebug`));
     } else {

@@ -34,7 +34,7 @@ export interface BuildTask {
   readonly phase: PhaseId;
 }
 
-export type Verdict = "pass" | "fail" | "pending";
+export type Verdict = "pass" | "fail" | "pending" | "skipped";
 
 /**
  * Durable build state. Persisted to BUILD_STATE.json. Treated as immutable in
@@ -69,6 +69,9 @@ export interface BuildState {
     readonly assemble: Verdict;
     /** `./gradlew :app:lintDebug` */
     readonly lint: Verdict;
+    /** Installed + launched on a device/emulator with no crash in logcat
+     * ("skipped" when no device is available). Proof the app actually runs. */
+    readonly runtime: Verdict;
     readonly notes: string;
   };
   /** Running log of notable decisions; helps recovery after compaction. */

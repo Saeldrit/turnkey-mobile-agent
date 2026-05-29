@@ -18,7 +18,7 @@ import {
   summarizeState,
 } from "./state.ts";
 import { runPhase } from "./runPhase.ts";
-import { phaseById } from "./phases.ts";
+import { phaseById, FIX_PHASE } from "./phases.ts";
 import { MAX_PHASE_ROUNDS, PLAN_FILENAME } from "./config.ts";
 import { emptyTotals, addUsage, overBudget, type BuildTotals } from "./budget.ts";
 import { log } from "./logger.ts";
@@ -180,6 +180,7 @@ function report(
     `Tasks:        ${tasksDone}/${state.tasks.length} done`,
     `Compile:      ${v.compile}`,
     `assembleDebug:${v.assemble}`,
+    `Runtime:      ${v.runtime}`,
     `Lint:         ${v.lint}`,
     `Signing:      ${state.deploy.signingConfigured ? "configured" : "no"}`,
     `App id:       ${state.deploy.applicationId || "?"} v${state.deploy.versionName} (${state.deploy.versionCode})`,
@@ -188,7 +189,67 @@ function report(
     `Tokens:       in ${totals.inputTokens.toLocaleString()} · out ${totals.outputTokens.toLocaleString()} · cacheRead ${totals.cacheReadTokens.toLocaleString()}`,
   ];
   for (const l of lines) console.log("  " + l);
-  const turnkey = v.compile === "pass" && v.assemble === "pass" && state.deploy.signingConfigured;
-  if (turnkey) log.success("Result: TURNKEY — app builds (APK) and is deployment-ready.");
+  const turnkey =
+    v.compile === "pass" &&
+    v.assemble === "pass" &&
+    v.runtime !== "fail" &&
+    state.deploy.signingConfigured;
+  if (turnkey) log.success("Result: TURNKEY — app builds, runs, and is deployment-ready.");
   else log.warn("Result: incomplete — see verification above; re-run / resume to continue.");
+}
+
+/**
+ * Fix / improve an already-built app from a user-reported problem: one FIX pass
+ * (reproduce + fix root cause, offline-first) followed by a VERIFY loop
+ * (build + runtime). Used by the menu's "Исправить / доработать" option.
+ */
+export async function fixBuild(
+  opts: BuildOptions,
+  problem: string,
+  reporter?: ProgressReporter,
+): Promise<void> {
+  const { appDir, slug, task } = opts;
+  let state = await loadState(appDir);
+  if (!state) {
+    log.error(`Нет ${appDir}/BUILD_STATE.json — это не приложение, собранное агентом.`);
+    return;
+  }
+  let totals = emptyTotals();
+
+  // FIX pass (reuses the implement id for model/tools/turns/progress).
+  if (reporter) reporter.startPhase("implement");
+  else log.phase(1, 2, FIX_PHASE.title);
+  const fix = await runPhase(
+    FIX_PHASE,
+    { task, slug, appDir, provider: opts.provider, round: 1, problem },
+    reporter,
+  );
+  totals = addUsage(totals, fix);
+  state = (await loadState(appDir)) ?? state;
+  await saveState(appDir, state);
+  if (reporter) reporter.finishPhase("implement");
+  else {
+    log.usage("fix", fix.usage.costUsd, fix.usage.inputTokens, fix.usage.outputTokens);
+    log.info(summarizeState(state));
+  }
+
+  // VERIFY loop (build + runtime) until it passes or rounds run out.
+  const maxRounds = MAX_PHASE_ROUNDS["verify"] ?? 1;
+  if (reporter) reporter.startPhase("verify");
+  for (let round = 1; round <= maxRounds; round++) {
+    if (overBudget(totals, opts.maxCostUsd)) break;
+    if (!reporter) log.phase(2, 2, `${phaseById("verify").title} (round ${round}/${maxRounds})`);
+    const vr = await runPhase(
+      phaseById("verify"),
+      { task, slug, appDir, provider: opts.provider, round },
+      reporter,
+    );
+    totals = addUsage(totals, vr);
+    state = (await loadState(appDir)) ?? state;
+    await saveState(appDir, state);
+    if (!reporter) log.info(summarizeState(state));
+    if (verificationPassed(state)) break;
+  }
+  if (reporter) reporter.finishPhase("verify");
+  report(totals, state, opts, reporter);
 }

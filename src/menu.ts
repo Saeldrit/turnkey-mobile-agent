@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Tui, type Choice } from "./tui.ts";
 import { loadEnv } from "./env.ts";
-import { build } from "./orchestrator.ts";
+import { build, fixBuild } from "./orchestrator.ts";
 import { ProgressReporter } from "./progress.ts";
 import { collectBuildOptions } from "./interactive.ts";
 import { printStatus } from "./status.ts";
@@ -158,6 +158,34 @@ async function installToPhone(b: BuildEntry): Promise<void> {
   log.success(`Установлено${appId ? " и запущено: " + appId : ""} ✓`);
 }
 
+async function fixFlow(): Promise<void> {
+  const builds = await listBuilds();
+  if (!builds.length) {
+    log.info("Сборок ещё нет. Сначала создай приложение.");
+    await pause();
+    return;
+  }
+  const b = await pickBuild(builds, "Какое приложение чинить / дорабатывать?");
+  if (!b) return;
+  console.log("\n" + c.bold("Опиши проблему или что улучшить:"));
+  console.log(c.dim("Напр.: «при сохранении — 400 ошибка», «список не обновляется», «UI стрёмный, переделай»"));
+  const problem = await tui.input("→");
+  if (!problem) {
+    log.info("Пусто — отмена.");
+    return;
+  }
+  const opts: BuildOptions = {
+    task: b.state.app.description || b.name,
+    appDir: b.dir,
+    slug: b.name,
+    provider: "anthropic",
+    resume: true,
+    maxCostUsd: DEFAULT_MAX_COST_USD,
+    planOnly: false,
+  };
+  await fixBuild(opts, problem, new ProgressReporter());
+}
+
 async function installFlow(): Promise<void> {
   const builds = await listBuilds();
   if (!builds.length) {
@@ -179,6 +207,7 @@ async function main(): Promise<void> {
     { label: "🆕  Создать новое приложение", value: "new" },
     { label: "📊  Статус сборок", value: "status" },
     { label: "▶   Продолжить незавершённую сборку", value: "resume" },
+    { label: "🛠   Исправить / доработать приложение", value: "fix" },
     { label: "📲  Собрать APK и поставить на телефон", value: "install" },
     { label: "🩺  Проверка готовности (doctor)", value: "doctor" },
     { label: "🚪  Выход", value: "exit" },
@@ -193,6 +222,7 @@ async function main(): Promise<void> {
         case "new": await newApp(); break;
         case "status": await printStatus(); await pause(); break;
         case "resume": await resumeBuild(); break;
+        case "fix": await fixFlow(); break;
         case "install": await installFlow(); break;
         case "doctor": await runDoctor(); await pause(); break;
       }

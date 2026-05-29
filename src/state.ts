@@ -31,7 +31,13 @@ export function defaultState(
       versionCode: 1,
       signingConfigured: false,
     },
-    verification: { compile: "pending", assemble: "pending", lint: "pending", notes: "" },
+    verification: {
+      compile: "pending",
+      assemble: "pending",
+      lint: "pending",
+      runtime: "pending",
+      notes: "",
+    },
     notes: [],
     updatedAt: new Date().toISOString(),
   };
@@ -80,7 +86,8 @@ export function tasksRemainInPhase(state: BuildState, phase: PhaseId): boolean {
 export function verificationPassed(state: BuildState): boolean {
   return (
     state.verification.compile === "pass" &&
-    state.verification.assemble === "pass"
+    state.verification.assemble === "pass" &&
+    state.verification.runtime !== "fail" // "pass"/"skipped"/"pending" ok; a crash blocks
   );
 }
 
@@ -91,6 +98,6 @@ export function summarizeState(state: BuildState): string {
   const v = state.verification;
   return (
     `phase=${state.phase} tasks=${done}/${total} ` +
-    `compile=${v.compile} assemble=${v.assemble} lint=${v.lint}`
+    `compile=${v.compile} assemble=${v.assemble} runtime=${v.runtime} lint=${v.lint}`
   );
 }

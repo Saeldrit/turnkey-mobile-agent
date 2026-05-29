@@ -24,9 +24,10 @@ Built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overvi
   1)  🆕  Создать новое приложение            (build a new app)
   2)  📊  Статус сборок                       (what's built, how far each got)
   3)  ▶   Продолжить незавершённую сборку     (resume an interrupted build)
-  4)  📲  Собрать APK и поставить на телефон  ("where's my app?" → APK + USB install)
-  5)  🩺  Проверка готовности (doctor)
-  6)  🚪  Выход
+  4)  🛠   Исправить / доработать приложение   (report a bug / "make it nicer" → agent fixes)
+  5)  📲  Собрать APK и поставить на телефон  ("where's my app?" → APK + USB install)
+  6)  🩺  Проверка готовности (doctor)
+  7)  🚪  Выход
 ```
 
 Navigate with **↑/↓ and Enter** (or just press the number; `q` cancels). Pick
@@ -163,10 +164,19 @@ A build is only reported `TURNKEY` when **all** hold:
 
 1. `gradlew :app:compileDebugKotlin` succeeds.
 2. `gradlew :app:assembleDebug` produces a debug APK (proof it builds).
-3. `build.gradle.kts` has applicationId / versionCode / versionName / min+target SDK.
-4. A release `signingConfig` reads from a gitignored `keystore.properties`, and `bundleRelease` is configured for a Play AAB.
-5. `README.md` documents run, release build, signing, and Play Console upload.
-6. A proper Android `.gitignore`.
+3. **It runs** — installs and launches on a connected device/emulator with no crash in
+   logcat (the agent checks this in VERIFY; `runtime = pass`, or `skipped` if no device).
+4. **Offline-first & real functionality** — every feature works against local data (Room / bundled
+   assets). The agent does **not** call a phantom backend, so no runtime 4xx/5xx errors.
+5. The UI meets a real **Material 3** bar (Scaffold + TopAppBar, spacing, components,
+   icons, loading/empty/error states) — not bare text.
+6. `build.gradle.kts` has applicationId / versionCode / versionName / SDKs; release
+   `signingConfig` from a gitignored `keystore.properties`; `bundleRelease` → Play AAB.
+7. `README.md` + a proper Android `.gitignore`.
+
+Found a bug after building? Menu option **🛠 Исправить / доработать** — pick the app,
+describe the problem ("400 on save", "list doesn't refresh", "ugly UI"), and the agent
+reproduces, fixes it (going local / fixing the crash / redesigning the UI), and re-verifies.
 
 Putting the generated app on a device / Play is then:
 

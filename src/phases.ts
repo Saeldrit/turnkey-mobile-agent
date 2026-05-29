@@ -14,6 +14,8 @@ export interface PhaseContext {
   readonly provider: string;
   /** 1-based round for loopable phases (implement / verify). */
   readonly round: number;
+  /** User-reported problem to fix (FIX flow only). */
+  readonly problem?: string;
 }
 
 export interface PhaseSpec {
@@ -74,8 +76,9 @@ export const PHASES: readonly PhaseSpec[] = [
       [
         anchor,
         `## OBJECTIVE — VERIFY${ctx.round > 1 ? ` (round ${ctx.round})` : ""}`,
-        `Prove the app builds. Run \`:app:compileDebugKotlin\` and fix EVERY error. Then run \`:app:assembleDebug\` and fix EVERY error until it produces an APK under app/build/outputs/apk/debug/. Then run \`:app:lintDebug\` and address real issues.`,
-        `Only set ${STATE_FILENAME}.verification.compile = "pass" when compileDebugKotlin exits 0, .assemble = "pass" when assembleDebug exits 0 and the APK exists, and .lint accordingly. Put caveats in .verification.notes. Never fake a pass — if it fails, fix the code and re-run.`,
+        `Prove the app builds AND runs. First: \`:app:compileDebugKotlin\` (fix EVERY error), then \`:app:assembleDebug\` until it produces an APK under app/build/outputs/apk/debug/, then \`:app:lintDebug\`.`,
+        `RUNTIME SMOKE TEST (this is required — "builds" is not "works"): run \`adb devices\`. If a device/emulator is connected: install (\`:app:installDebug\` or adb install the APK), launch it (\`adb shell am start -n <applicationId>/.MainActivity\`), wait ~5s, then read \`adb logcat -d\` filtered to this app. If you see "FATAL EXCEPTION", "AndroidRuntime", an ANR, or ANY runtime error — including 4xx/5xx from a phantom backend (remove such network calls and go fully local/offline) — FIX the code and repeat. Tap through core screens if practical.`,
+        `Set ${STATE_FILENAME}.verification: .compile = "pass" when compile exits 0; .assemble = "pass" when the APK exists; .runtime = "pass" when the app launches with no crash/error in logcat, "skipped" if no device is connected, "fail" while a crash still needs fixing; .lint accordingly. Put caveats in .verification.notes. Never fake a pass.`,
       ].join("\n\n"),
   },
   {
@@ -109,3 +112,25 @@ export function phaseById(id: PhaseId): PhaseSpec {
   if (!spec) throw new Error(`Unknown phase: ${id}`);
   return spec;
 }
+
+/**
+ * Standalone phase for the FIX flow (not part of the normal pipeline). Reuses
+ * the "implement" id for model/tools/turns/progress lookups, but targets a
+ * user-reported problem on an already-built app. Followed by a VERIFY loop.
+ */
+export const FIX_PHASE: PhaseSpec = {
+  id: "implement",
+  title: "Исправление",
+  buildPrompt: (ctx) =>
+    [
+      anchor,
+      `## OBJECTIVE — FIX / IMPROVE the existing app`,
+      `The user reports a problem with the already-built app. Reproduce it, find the root cause, and FIX it so the app genuinely works. VERIFY (build + runtime) runs afterwards.`,
+      `### User's report\n${(ctx.problem ?? "").trim() || "(no details — audit the app for broken functionality and weak UI, then fix)"}`,
+      `How to proceed: read the relevant code first. If a device is connected, reproduce it (\`adb devices\`; install + launch + \`adb logcat -d\`).`,
+      `- If it's a network / 4xx / 5xx error: the app is calling a backend that should not exist — REMOVE the remote calls and make that feature work fully locally (Room / bundled assets / on-device logic).`,
+      `- If it's a crash: fix the exception (read the stack trace in logcat).`,
+      `- If it's the UI ("ugly" / "стремный"): redesign to the QUALITY BAR — Material 3 Scaffold + TopAppBar, proper spacing/typography, Cards/components, icons, and real loading/empty/error states.`,
+      `Make targeted edits. Add a ${STATE_FILENAME}.notes entry describing the fix, and set the affected ${STATE_FILENAME}.verification verdicts back to "pending" so VERIFY re-checks them. Do not declare success here — VERIFY will.`,
+    ].join("\n\n"),
+};

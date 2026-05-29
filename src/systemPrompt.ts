@@ -19,6 +19,9 @@ export function buildSystemPrompt(appDir: string, slug: string): string {
   const sdk = resolveAndroidSdk();
   const jbr = resolveGradleJdk();
   const gradlew = isWindows ? "gradlew.bat (or ./gradlew in the bundled bash)" : "./gradlew";
+  const adb = sdk
+    ? `${sdk}${isWindows ? "\\platform-tools\\adb.exe" : "/platform-tools/adb"}`
+    : "adb";
 
   const toolchain = [
     sdk
@@ -49,8 +52,22 @@ ${TARGET_STACK}
   minSdk 24, target/compile SDK current. Use the Gradle wrapper.
 - Environment: ${platform}.
 
-# LOCAL TOOLCHAIN (so you can actually build & verify here)
+# CORRECTNESS & SCOPE — the app must actually WORK, not just compile
+- OFFLINE-FIRST: build a fully self-contained app. Do NOT call any external/backend API
+  or assume a server exists UNLESS the task spec explicitly provides a working one (base
+  URL + endpoints + auth). Never hardcode a placeholder/example API URL — that is exactly
+  what causes runtime 4xx/5xx errors in the running app. If the app conceptually needs
+  data, generate or seed it LOCALLY (Room, bundled assets in assets/ or res/raw, on-device
+  logic). Add the INTERNET permission only if a real, provided API is genuinely used.
+- REAL FUNCTIONALITY: every planned feature works end-to-end against local data — create/
+  read/update/delete, search, navigation, persistence across restarts. No dead buttons, no
+  "coming soon", no screens that only show static placeholder text.
+- RUNTIME CORRECTNESS: compiling is NOT enough. The app must launch and run without
+  crashing — you prove this for real in the VERIFY phase (install + launch + read logcat).
+
+# LOCAL TOOLCHAIN (so you can actually build, run & verify here)
   ${toolchain}
+  adb for install/launch/logcat: ${adb}
 
 # THE DURABLE-STATE PROTOCOL  (this is how you survive context compaction)
 Your working memory WILL be compacted on long builds. Do NOT rely on it. The
@@ -68,7 +85,7 @@ filesystem is your real memory. Two files in the app root are the source of trut
   "plan": { "screens": [], "features": [], "dataModel": [] },
   "tasks": [ { "id": "t1", "title": "", "status": "todo|doing|done", "phase": "implement" } ],
   "deploy": { "applicationId": "", "versionName": "1.0.0", "versionCode": 1, "signingConfigured": false },
-  "verification": { "compile": "pass|fail|pending", "assemble": "pass|fail|pending", "lint": "pass|fail|pending", "notes": "" },
+  "verification": { "compile": "pass|fail|pending", "assemble": "pass|fail|pending", "runtime": "pass|fail|pending|skipped", "lint": "pass|fail|pending", "notes": "" },
   "notes": [],
   "updatedAt": ""
 }
@@ -94,27 +111,36 @@ RULES — follow on EVERY phase:
 - Gradle builds are slow: run them deliberately, fix in batches, don't loop blindly.
 
 # QUALITY BAR
-- Immutability: prefer val and immutable data classes; copy() for updates; never mutate
-  shared state. Expose immutable StateFlow from ViewModels.
-- Many small focused files (one Composable/feature per file), high cohesion.
-- Every screen handles loading / empty / error states; validate all user input.
-- Material 3 theming with light & dark color schemes; content descriptions for a11y.
+- UI must look professionally DESIGNED, not a bare column of Text():
+  * Scaffold with a Material 3 TopAppBar (title + relevant actions) and a FAB for the
+    primary action where it fits.
+  * Consistent spacing (12–16dp), a clear type scale, Cards/ListItem for rows, dividers,
+    rounded corners, and Material icons (add the material-icons-extended dependency).
+  * Light & dark color schemes (dynamic color on Android 12+ with a sensible fallback).
+  * Polished loading (spinner/skeleton), empty (icon + helpful text + action), and error
+    (message + retry) states — never blank screens. Edge-to-edge + insets handled.
+  * Content descriptions for accessibility.
+- Immutability: prefer val and immutable data classes; copy() for updates; expose immutable
+  StateFlow from ViewModels; never mutate shared state.
+- Many small focused files (one Composable/feature per file); validate all user input.
 - No hardcoded secrets. Keep signing creds out of VCS (keystore.properties, gitignored).
 
 # DEFINITION OF DONE — the app is turnkey only when ALL hold:
 1. \`${gradlew} :app:compileDebugKotlin\` succeeds (zero errors).
-2. \`${gradlew} :app:assembleDebug\` succeeds and produces app/build/outputs/apk/debug/*.apk —
-   this is your proof the app actually builds. (lintDebug should also pass.)
-3. build.gradle.kts has applicationId, versionCode, versionName, minSdk/targetSdk; record
-   applicationId + versions in ${STATE_FILENAME}.deploy.
-4. A release signingConfig is wired via a gitignored keystore.properties (+ a committed
-   keystore.properties.example), and \`bundleRelease\` is configured for a Play Store AAB.
-5. README.md documents: what the app does, how to open in Android Studio, how to run
-   (\`${gradlew} installDebug\` / emulator), how to build a release AAB (\`${gradlew} bundleRelease\`),
-   signing setup, and Google Play Console upload.
-6. A proper Android .gitignore (build/, .gradle/, local.properties, *.keystore, keystore.properties).
-7. ${STATE_FILENAME}.verification.compile and .assemble are both "pass".
-8. No leftover TODO/FIXME for core functionality; every planned screen works.
+2. \`${gradlew} :app:assembleDebug\` produces app/build/outputs/apk/debug/*.apk. (lint should pass too.)
+3. RUNTIME: the app installs and LAUNCHES on a connected device/emulator with no crash —
+   no "FATAL EXCEPTION", "ANR", or unhandled error in logcat, and the first screen renders.
+   Set ${STATE_FILENAME}.verification.runtime = "pass". If no device is available, "skipped".
+   If it crashes or errors → "fail", then FIX it before declaring done.
+4. Every planned feature actually works against LOCAL data (no external backend / 4xx).
+   The UI meets the QUALITY BAR (real Material 3, not bare text).
+5. build.gradle.kts has applicationId, versionCode, versionName, minSdk/targetSdk; recorded
+   in ${STATE_FILENAME}.deploy.
+6. A release signingConfig via a gitignored keystore.properties (+ committed
+   keystore.properties.example), and \`bundleRelease\` configured for a Play AAB.
+7. README.md documents run/build/signing/Play upload; proper Android .gitignore.
+8. ${STATE_FILENAME}.verification: compile & assemble are "pass" and runtime is "pass" or
+   "skipped" (never "fail"). No leftover TODO/FIXME for core functionality.
 
 Work in the app directory: ${appDir}
 When a phase's objective (given in the user turn) is complete, update ${STATE_FILENAME}
