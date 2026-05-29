@@ -1,0 +1,42 @@
+{
+  "name": "turnkey-mobile-agent",
+  "version": "1.0.0",
+  "description": "Autonomous agent that builds turnkey, deployable native Android (Kotlin + Jetpack Compose) apps from a single task spec. Multi-provider (Claude/Qwen/DeepSeek/Kimi/GLM), context-compaction resilient, token-economical.",
+  "type": "module",
+  "bin": {
+    "turnkey-mobile": "./src/cli.ts"
+  },
+  "scripts": {
+    "start": "tsx src/wizard.ts",
+    "wizard": "tsx src/wizard.ts",
+    "cli": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx src/smoke.ts",
+    "doctor": "tsx src/doctor.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "claude",
+    "agent-sdk",
+    "android",
+    "kotlin",
+    "jetpack-compose",
+    "autonomous-agent",
+    "mobile",
+    "codegen",
+    "qwen",
+    "multi-provider"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.156"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
