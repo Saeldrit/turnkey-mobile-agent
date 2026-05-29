@@ -3,6 +3,9 @@
  * DEPLOY → FINALIZE, where IMPLEMENT and VERIFY loop until their done-condition
  * holds (or a bounded number of rounds elapses). Enforces a cost ceiling and
  * supports --resume by skipping phases already recorded in BUILD_STATE.json.
+ *
+ * With a ProgressReporter (interactive menu/wizard) it shows a compact "[NN%]"
+ * progress UI; without one (flag CLI / CI) it logs the verbose stream.
  */
 import { mkdir } from "node:fs/promises";
 import {
@@ -19,6 +22,7 @@ import { phaseById } from "./phases.ts";
 import { MAX_PHASE_ROUNDS, PLAN_FILENAME } from "./config.ts";
 import { emptyTotals, addUsage, overBudget, type BuildTotals } from "./budget.ts";
 import { log } from "./logger.ts";
+import type { ProgressReporter } from "./progress.ts";
 import { PHASE_ORDER, type BuildOptions, type BuildState, type PhaseId } from "./types.ts";
 
 function nextOf(id: PhaseId): PhaseId {
@@ -34,7 +38,7 @@ function humanizeSlug(slug: string): string {
     .join(" ");
 }
 
-export async function build(opts: BuildOptions): Promise<void> {
+export async function build(opts: BuildOptions, reporter?: ProgressReporter): Promise<void> {
   const { appDir, slug, task } = opts;
   await mkdir(appDir, { recursive: true });
 
@@ -44,40 +48,41 @@ export async function build(opts: BuildOptions): Promise<void> {
     defaultState(humanizeSlug(slug), slug, task.split("\n")[0]?.trim() ?? "");
   await saveState(appDir, state);
 
-  if (opts.resume && state.phasesCompleted.length > 0) {
-    log.info(
-      `Resuming — completed: [${state.phasesCompleted.join(", ")}] (${summarizeState(state)})`,
-    );
+  if (opts.resume && state.phasesCompleted.length > 0 && !reporter) {
+    log.info(`Resuming — completed: [${state.phasesCompleted.join(", ")}] (${summarizeState(state)})`);
   }
 
   let totals = emptyTotals();
   const totalPhases = PHASE_ORDER.length;
   let phaseNo = 0;
-
-  const completed = () => state.phasesCompleted;
-  const isSkipped = (id: PhaseId) => opts.resume && completed().includes(id);
+  const isSkipped = (id: PhaseId) => opts.resume && state.phasesCompleted.includes(id);
 
   // --- single-shot phase ---------------------------------------------------
   async function once(id: PhaseId): Promise<void> {
     phaseNo++;
     if (isSkipped(id)) {
-      log.success(`Phase ${phaseNo}/${totalPhases} ${id}: already complete — skipped`);
+      if (reporter) reporter.finishPhase(id);
+      else log.success(`Phase ${phaseNo}/${totalPhases} ${id}: already complete — skipped`);
       return;
     }
-    log.phase(phaseNo, totalPhases, phaseById(id).title);
-    const res = await runPhase(phaseById(id), {
-      task,
-      slug,
-      appDir,
-      provider: opts.provider,
-      round: 1,
-    });
+    if (reporter) reporter.startPhase(id);
+    else log.phase(phaseNo, totalPhases, phaseById(id).title);
+
+    const res = await runPhase(
+      phaseById(id),
+      { task, slug, appDir, provider: opts.provider, round: 1 },
+      reporter,
+    );
     totals = addUsage(totals, res);
-    log.usage(`phase ${id}`, res.usage.costUsd, res.usage.inputTokens, res.usage.outputTokens);
     state = (await loadState(appDir)) ?? state;
     state = markPhaseComplete(state, id, nextOf(id));
     await saveState(appDir, state);
-    log.info(summarizeState(state));
+
+    if (reporter) reporter.finishPhase(id);
+    else {
+      log.usage(`phase ${id}`, res.usage.costUsd, res.usage.inputTokens, res.usage.outputTokens);
+      log.info(summarizeState(state));
+    }
     if (!res.ok) log.warn(`phase ${id} ended with: ${res.subtype}`);
   }
 
@@ -85,41 +90,49 @@ export async function build(opts: BuildOptions): Promise<void> {
   async function loop(id: PhaseId, done: (s: BuildState) => boolean): Promise<void> {
     phaseNo++;
     if (isSkipped(id)) {
-      log.success(`Phase ${phaseNo}/${totalPhases} ${id}: already complete — skipped`);
+      if (reporter) reporter.finishPhase(id);
+      else log.success(`Phase ${phaseNo}/${totalPhases} ${id}: already complete — skipped`);
       return;
     }
+    if (reporter) reporter.startPhase(id);
     const maxRounds = MAX_PHASE_ROUNDS[id] ?? 1;
     for (let round = 1; round <= maxRounds; round++) {
-      if (overBudget(totals, opts.maxCostUsd)) return;
-      log.phase(phaseNo, totalPhases, `${phaseById(id).title} (round ${round}/${maxRounds})`);
-      const res = await runPhase(phaseById(id), {
-        task,
-        slug,
-        appDir,
-        provider: opts.provider,
-        round,
-      });
+      if (overBudget(totals, opts.maxCostUsd)) {
+        if (reporter) reporter.done();
+        return;
+      }
+      if (!reporter) log.phase(phaseNo, totalPhases, `${phaseById(id).title} (round ${round}/${maxRounds})`);
+      const res = await runPhase(
+        phaseById(id),
+        { task, slug, appDir, provider: opts.provider, round },
+        reporter,
+      );
       totals = addUsage(totals, res);
-      log.usage(`phase ${id} r${round}`, res.usage.costUsd, res.usage.inputTokens, res.usage.outputTokens);
       state = (await loadState(appDir)) ?? state;
       await saveState(appDir, state);
-      log.info(summarizeState(state));
+      if (!reporter) {
+        log.usage(`phase ${id} r${round}`, res.usage.costUsd, res.usage.inputTokens, res.usage.outputTokens);
+        log.info(summarizeState(state));
+      }
       if (done(state)) {
         state = markPhaseComplete(state, id, nextOf(id));
         await saveState(appDir, state);
-        log.success(`phase ${id} satisfied after ${round} round(s)`);
+        if (reporter) reporter.finishPhase(id);
+        else log.success(`phase ${id} satisfied after ${round} round(s)`);
         return;
       }
-      log.warn(`phase ${id}: not done after round ${round}`);
+      if (!reporter) log.warn(`phase ${id}: not done after round ${round}`);
     }
-    log.warn(`phase ${id}: bounded rounds exhausted; proceeding (will retry on --resume)`);
+    if (reporter) reporter.finishPhase(id);
+    else log.warn(`phase ${id}: bounded rounds exhausted; proceeding (will retry on --resume)`);
   }
 
   // --- drive the pipeline ---------------------------------------------------
   const stopIfBroke = (): boolean => {
     if (overBudget(totals, opts.maxCostUsd)) {
+      if (reporter) reporter.done();
       log.warn(
-        `Cost ceiling $${opts.maxCostUsd} reached ($${totals.costUsd.toFixed(2)}). Stopping. Re-run with --resume to continue.`,
+        `Cost ceiling $${opts.maxCostUsd} reached ($${totals.costUsd.toFixed(2)}). Stopping. Re-run / resume to continue.`,
       );
       return true;
     }
@@ -128,29 +141,35 @@ export async function build(opts: BuildOptions): Promise<void> {
 
   await once("plan");
   if (opts.planOnly) {
+    if (reporter) reporter.done();
     log.success(`Plan-only run complete. See ${PLAN_FILENAME} and BUILD_STATE.json.`);
-    report(totals, state, opts);
-    return;
+    return report(totals, state, opts, reporter);
   }
-  if (stopIfBroke()) return report(totals, state, opts);
+  if (stopIfBroke()) return report(totals, state, opts, reporter);
 
   await once("scaffold");
-  if (stopIfBroke()) return report(totals, state, opts);
+  if (stopIfBroke()) return report(totals, state, opts, reporter);
 
   await loop("implement", (s) => !tasksRemainInPhase(s, "implement"));
-  if (stopIfBroke()) return report(totals, state, opts);
+  if (stopIfBroke()) return report(totals, state, opts, reporter);
 
   await loop("verify", (s) => verificationPassed(s));
-  if (stopIfBroke()) return report(totals, state, opts);
+  if (stopIfBroke()) return report(totals, state, opts, reporter);
 
   await once("deploy");
-  if (stopIfBroke()) return report(totals, state, opts);
+  if (stopIfBroke()) return report(totals, state, opts, reporter);
 
   await once("finalize");
-  report(totals, state, opts);
+  report(totals, state, opts, reporter);
 }
 
-function report(totals: BuildTotals, state: BuildState, opts: BuildOptions): void {
+function report(
+  totals: BuildTotals,
+  state: BuildState,
+  opts: BuildOptions,
+  reporter?: ProgressReporter,
+): void {
+  reporter?.done();
   log.banner("BUILD SUMMARY");
   const v = state.verification;
   const tasksDone = state.tasks.filter((t) => t.status === "done").length;
@@ -169,8 +188,7 @@ function report(totals: BuildTotals, state: BuildState, opts: BuildOptions): voi
     `Tokens:       in ${totals.inputTokens.toLocaleString()} · out ${totals.outputTokens.toLocaleString()} · cacheRead ${totals.cacheReadTokens.toLocaleString()}`,
   ];
   for (const l of lines) console.log("  " + l);
-  const turnkey =
-    v.compile === "pass" && v.assemble === "pass" && state.deploy.signingConfigured;
+  const turnkey = v.compile === "pass" && v.assemble === "pass" && state.deploy.signingConfigured;
   if (turnkey) log.success("Result: TURNKEY — app builds (APK) and is deployment-ready.");
-  else log.warn("Result: incomplete — see verification above; re-run with --resume.");
+  else log.warn("Result: incomplete — see verification above; re-run / resume to continue.");
 }

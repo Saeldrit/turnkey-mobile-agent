@@ -7,7 +7,8 @@
     "turnkey-mobile": "./src/cli.ts"
   },
   "scripts": {
-    "start": "tsx src/wizard.ts",
+    "start": "tsx src/menu.ts",
+    "menu": "tsx src/menu.ts",
     "wizard": "tsx src/wizard.ts",
     "cli": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",

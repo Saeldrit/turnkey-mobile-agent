@@ -7,11 +7,12 @@
 import { readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { loadState } from "./state.ts";
 import { log, c } from "./logger.ts";
 import { PHASE_ORDER } from "./types.ts";
 
-async function main(): Promise<void> {
+export async function printStatus(): Promise<void> {
   log.banner("TURNKEY MOBILE — STATUS");
   const ws = resolve(process.cwd(), "workspace");
   if (!existsSync(ws)) {
@@ -50,7 +51,9 @@ async function main(): Promise<void> {
   console.log("");
 }
 
-void main().catch((e) => {
-  log.error(e instanceof Error ? e.message : String(e));
-  process.exitCode = 1;
-});
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  void printStatus().catch((e) => {
+    log.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+  });
+}

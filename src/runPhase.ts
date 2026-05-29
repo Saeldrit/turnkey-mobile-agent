@@ -1,16 +1,21 @@
 /**
- * Runs a single phase as one bounded SDK query: builds options, streams the
- * agent's messages to the console in compact form, and captures usage/cost.
+ * Runs a single phase as one bounded SDK query: builds options, applies the
+ * phase's provider, streams the agent's activity, and captures usage/cost.
  *
- * Each phase is its own query() with a fresh, lean context — this is what keeps
- * token use bounded and makes the build resilient to (and recoverable from)
- * context compaction.
+ * Two output modes:
+ *  - verbose (no reporter): logs every tool call — used by the flag CLI / CI.
+ *  - progress (reporter given): feeds a compact "[NN%] phase · action" line —
+ *    used by the interactive menu/wizard.
+ *
+ * Each phase is its own query() with a fresh, lean context — what keeps token
+ * use bounded and makes the build resilient to (and recoverable from) compaction.
  */
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { buildSystemPrompt } from "./systemPrompt.ts";
 import { modelForPhase, MAX_TURNS, TOOLS_FOR_PHASE } from "./config.ts";
 import { applyProvider, providerForPhase } from "./providers.ts";
 import { log, truncate } from "./logger.ts";
+import type { ProgressReporter } from "./progress.ts";
 import type { PhaseSpec, PhaseContext } from "./phases.ts";
 import type { PhaseResult, PhaseUsage } from "./types.ts";
 
@@ -62,6 +67,7 @@ function summarizeToolInput(name: string, input: unknown): string {
   const pick = (k: string) => (typeof i[k] === "string" ? (i[k] as string) : "");
   switch (name) {
     case "Bash":
+    case "PowerShell":
       return pick("command");
     case "Write":
     case "Read":
@@ -85,14 +91,42 @@ function summarizeToolInput(name: string, input: unknown): string {
   }
 }
 
-function renderAssistant(content: unknown): void {
+/** Russian verb for the progress line, by tool. */
+function actionVerb(name: string): string {
+  switch (name) {
+    case "Write": return "пишу";
+    case "Edit": return "правлю";
+    case "Read": return "читаю";
+    case "Bash":
+    case "PowerShell": return "выполняю";
+    case "Glob":
+    case "Grep": return "ищу";
+    case "Agent": return "делегирую";
+    case "WebFetch":
+    case "WebSearch": return "смотрю в сети";
+    default: return name;
+  }
+}
+
+/** Shorten a long absolute path to its last couple of segments. */
+function shortDetail(detail: string): string {
+  const parts = detail.replace(/\\/g, "/").split("/");
+  return parts.length > 2 ? parts.slice(-2).join("/") : detail;
+}
+
+function renderAssistant(content: unknown, reporter?: ProgressReporter): void {
   if (!Array.isArray(content)) return;
   for (const raw of content as AnyBlock[]) {
     if (!raw || typeof raw !== "object") continue;
-    if (raw.type === "text" && raw.text) log.agentText(raw.text);
-    else if (raw.type === "thinking" && raw.thinking) log.thinking(raw.thinking);
-    else if (raw.type === "tool_use" && raw.name)
-      log.tool(raw.name, summarizeToolInput(raw.name, raw.input));
+    if (raw.type === "tool_use" && raw.name) {
+      const detail = summarizeToolInput(raw.name, raw.input);
+      if (reporter) reporter.setAction(`${actionVerb(raw.name)} ${shortDetail(detail)}`.trim());
+      else log.tool(raw.name, detail);
+    } else if (raw.type === "text" && raw.text) {
+      if (!reporter) log.agentText(raw.text);
+    } else if (raw.type === "thinking" && raw.thinking) {
+      if (!reporter) log.thinking(raw.thinking);
+    }
   }
 }
 
@@ -110,18 +144,19 @@ function readUsage(msg: Record<string, unknown>): PhaseUsage {
 export async function runPhase(
   spec: PhaseSpec,
   ctx: PhaseContext,
+  reporter?: ProgressReporter,
 ): Promise<PhaseResult> {
   const model = modelForPhase(spec.id);
   const startedAt = process.hrtime.bigint();
 
-  // Resolve + apply the LLM provider for this phase (env mutation). Per-phase
-  // override (TURNKEY_PROVIDER_<GROUP>) lets a single build mix providers.
   const providerId = providerForPhase(spec.id, ctx.provider);
   const provider = applyProvider(providerId);
-  const via = process.env.ANTHROPIC_BASE_URL ? ` @ ${process.env.ANTHROPIC_BASE_URL}` : "";
-  log.info(
-    `provider=${provider.label}${via} model=${model} maxTurns=${MAX_TURNS[spec.id]} tools=[${TOOLS_FOR_PHASE[spec.id].join(", ")}]`,
-  );
+  if (!reporter) {
+    const via = process.env.ANTHROPIC_BASE_URL ? ` @ ${process.env.ANTHROPIC_BASE_URL}` : "";
+    log.info(
+      `provider=${provider.label}${via} model=${model} maxTurns=${MAX_TURNS[spec.id]} tools=[${TOOLS_FOR_PHASE[spec.id].join(", ")}]`,
+    );
+  }
 
   const prompt = spec.buildPrompt(ctx);
   const options = {
@@ -135,9 +170,6 @@ export async function runPhase(
     allowedTools: TOOLS_FOR_PHASE[spec.id],
     permissionMode: "bypassPermissions" as const,
     maxTurns: MAX_TURNS[spec.id],
-    // Isolate from the host machine's global ~/.claude config: keeps each phase
-    // deterministic and lean (token economy), and avoids loading rules unrelated
-    // to building the app.
     settingSources: [] as ("user" | "project" | "local")[],
   };
 
@@ -147,8 +179,6 @@ export async function runPhase(
   let numTurns = 0;
   let ok = false;
 
-  // Retry transient API/network failures. Re-running a phase is safe: the agent
-  // re-reads the durable state files and continues from the first unfinished task.
   const MAX_ATTEMPTS = 4;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     sessionId = undefined;
@@ -162,11 +192,12 @@ export async function runPhase(
         const type = m.type as string;
         if (type === "system" && m.subtype === "init") {
           sessionId = m.session_id as string | undefined;
-          const mdl = (m.model as string) ?? model;
-          log.step(`session started (${mdl})${attempt > 1 ? ` [retry ${attempt}]` : ""}`);
+          if (!reporter) {
+            const mdl = (m.model as string) ?? model;
+            log.step(`session started (${mdl})${attempt > 1 ? ` [retry ${attempt}]` : ""}`);
+          }
         } else if (type === "assistant") {
-          const inner = (m.message as Record<string, unknown>)?.content;
-          renderAssistant(inner);
+          renderAssistant((m.message as Record<string, unknown>)?.content, reporter);
         } else if (type === "result") {
           subtype = (m.subtype as string) ?? "unknown";
           numTurns = Number(m.num_turns ?? 0);
@@ -179,7 +210,8 @@ export async function runPhase(
       if (attempt < MAX_ATTEMPTS && isTransient(err)) {
         const wait = 2000 * attempt + 1000;
         const short = (err instanceof Error ? err.message : String(err)).slice(0, 120);
-        log.warn(`transient error (attempt ${attempt}/${MAX_ATTEMPTS}): ${short} — retrying in ${wait}ms`);
+        if (reporter) reporter.setAction(`сетевой сбой — повтор ${attempt}/${MAX_ATTEMPTS}…`);
+        else log.warn(`transient error (attempt ${attempt}/${MAX_ATTEMPTS}): ${short} — retrying in ${wait}ms`);
         await sleep(wait);
         continue;
       }

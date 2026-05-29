@@ -12,11 +12,25 @@ Built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overvi
 
 ---
 
-## The interface — a console wizard (no flags to learn)
+## The console UI
 
-You drive everything from one interactive menu. **Double-click `start.bat`**
-(Windows) or run **`./start.sh`** (macOS/Linux) — or `npm start` in a terminal.
-The wizard walks you through it:
+`npm start` — or double-click **`start.bat`** (Windows) / run **`./start.sh`**
+(macOS/Linux) — opens the home menu:
+
+```text
+══════════════════
+  TURNKEY MOBILE
+══════════════════
+  1)  🆕  Создать новое приложение            (build a new app)
+  2)  📊  Статус сборок                       (what's built, how far each got)
+  3)  ▶   Продолжить незавершённую сборку     (resume an interrupted build)
+  4)  📲  Собрать APK и поставить на телефон  ("where's my app?" → APK + USB install)
+  5)  🩺  Проверка готовности (doctor)
+  6)  🚪  Выход
+```
+
+Pick **1** and it walks you through a few questions, then builds with a live
+progress bar:
 
 ```text
 ══════════════════════════════════
@@ -44,16 +58,19 @@ The wizard walks you through it:
 Готово к запуску:   Enter — запустить, q — отмена
 ```
 
-That's the whole UX — answer the questions and the agent builds the app. The
-wizard also:
+While it builds you see only a compact progress bar — not a wall of logs:
 
-- **lists every model with its readiness** and lets you pick by number;
-- if you pick a provider that needs a key, it **offers to enter it and save it to `.env`** (once);
-- if it finds an interrupted build for that name, it **offers to resume**;
-- streams live progress, then prints a final build summary.
+```text
+  ✓ ████████░░░░░░░░░░░░░░  22%  Каркас проекта
+  ⠹ ██████████████░░░░░░░░  61%  Реализация · пишу NoteEditorScreen.kt
+```
 
-The finished app lands in `workspace/<slug>/` — open it in Android Studio or run
-`gradlew installDebug` to put it on a connected phone.
+No flags to remember. The wizard also **lists every model with its readiness**,
+**offers to enter + save a provider key** if one is missing, and **offers to
+resume** a build it finds. Menu option **4** is the "I forgot where my app is and
+how to run it" button — it builds the debug APK and installs it on a connected
+phone over USB. Source lands in `workspace/<slug>/` (open in Android Studio, or
+`gradlew installDebug`).
 
 ---
 
@@ -214,20 +231,22 @@ TURNKEY_PROVIDER_PLAN=anthropic TURNKEY_PROVIDER_BUILD=qwen \
 
 ```text
 src/
-  wizard.ts         # interactive console UI — the default entry (npm start / start.bat)
+  menu.ts           # console menu home screen — the default entry (npm start / start.bat)
+  wizard.ts         # the straight "build one app" flow (npm run wizard)
   cli.ts            # flag-based entry for scripting / CI
+  interactive.ts    # shared "new app" questions     prompt.ts # buffered console input
+  progress.ts       # live % progress bar            status.ts # build status (npm run status)
   doctor.ts         # readiness check (npm run doctor)
-  orchestrator.ts   # deterministic phase pipeline + budget + resume
+  orchestrator.ts   # deterministic phase pipeline + budget + resume + progress
   phases.ts         # per-phase objectives (Android pipeline)
-  runPhase.ts       # one phase = one bounded SDK query (streaming + usage + provider + retry)
+  runPhase.ts       # one phase = one bounded SDK query (progress/verbose + provider + retry)
   systemPrompt.ts   # role + durable-state protocol + DoD (appended to the preset)
   providers.ts      # Claude / Qwen / DeepSeek / Kimi / GLM / custom registry
   state.ts          # BUILD_STATE.json (durable, immutable updates)
   budget.ts         # token/cost accounting + ceiling
   config.ts         # per-phase model/turns/tools + Android SDK/JDK resolution
-  slug.ts           # slug helper      env.ts # .env loader      logger.ts # console output
-  smoke.ts          # SDK/auth/provider check
-start.bat / start.sh  # one-click launchers (install deps + open the wizard)
+  slug.ts  env.ts  logger.ts  smoke.ts   # helpers + SDK/auth check
+start.bat / start.sh  # one-click launchers (install deps + open the menu)
 examples/             # ready-to-run task specs
 workspace/            # generated apps land here
 ```

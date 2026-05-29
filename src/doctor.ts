@@ -4,6 +4,7 @@
  * Run this first on a fresh machine (e.g. after someone hands you the agent).
  */
 import { execSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { loadEnv } from "./env.ts";
 import { log, c } from "./logger.ts";
 import { knownProviders, providerReady, PROVIDERS } from "./providers.ts";
@@ -22,7 +23,7 @@ function line(good: boolean, label: string, detail: string): void {
   (good ? log.success : log.warn)(`${label} ${c.dim(detail)}`);
 }
 
-async function main(): Promise<void> {
+export async function runDoctor(): Promise<void> {
   await loadEnv();
   log.banner("TURNKEY MOBILE — DOCTOR");
 
@@ -62,4 +63,10 @@ async function main(): Promise<void> {
   else log.error("Not ready — configure a provider first (see .env.example).");
 }
 
-void main();
+// Auto-run only when invoked directly (npm run doctor), not when imported by the menu.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  void runDoctor().catch((e) => {
+    log.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+  });
+}
